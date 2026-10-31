@@ -24,14 +24,25 @@ export default async function handler(req, res) {
         if (!phone) { invalid.push(c.phone); continue; }
         if (seen.has(phone)) continue;
         seen.add(phone);
-        const row = { business_id, phone };
-        if (c.name) row.name = String(c.name).trim();
-        if (c.tags?.length) row.tags = c.tags;
-        if (c.birthday) row.birthday = c.birthday;
-        rows.push(row);
+        rows.push({ business_id, phone, name: c.name ? String(c.name).trim() : null,
+          tags: c.tags || [], birthday: c.birthday || null });
       }
+      // Every row in a bulk upsert must have the same columns, so merge with what is already saved:
+      // a re-import never wipes an existing name/birthday and only adds tags.
       for (let i = 0; i < rows.length; i += 500) {
-        const { error } = await db.from('customers').upsert(rows.slice(i, i + 500), { onConflict: 'business_id,phone' });
+        const chunk = rows.slice(i, i + 500);
+        const { data: existing, error: exErr } = await db.from('customers').select('phone, name, tags, birthday')
+          .eq('business_id', business_id).in('phone', chunk.map(r => r.phone));
+        if (exErr) throw exErr;
+        const old = Object.fromEntries(existing.map(e => [e.phone, e]));
+        for (const r of chunk) {
+          const o = old[r.phone];
+          if (!o) continue;
+          r.name ||= o.name;
+          r.birthday ||= o.birthday;
+          r.tags = [...new Set([...o.tags, ...r.tags])];
+        }
+        const { error } = await db.from('customers').upsert(chunk, { onConflict: 'business_id,phone' });
         if (error) throw error;
       }
       return res.json({ saved: rows.length, invalid });
