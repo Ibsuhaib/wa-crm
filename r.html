@@ -4,82 +4,36 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rate your visit</title>
-<style>
-  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --muted:#667085; --line:#e4e7ec; --brand:#128c4a; --brand-ink:#fff; --star:#f5a623; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#0f1115; --card:#181b21; --ink:#eceef2; --muted:#98a2b3; --line:#2a2f38; --brand:#25b864; --brand-ink:#06210f; }
-  }
-  * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; display:grid; place-items:center; padding:16px; background:var(--bg); color:var(--ink); font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  .card { width:100%; max-width:420px; background:var(--card); border:1px solid var(--line); border-radius:16px; padding:28px 22px; text-align:center; }
-  h1 { font-size:20px; margin:0 0 6px; }
-  p { color:var(--muted); margin:0 0 18px; }
-  .stars { display:flex; justify-content:center; gap:6px; }
-  .stars button { font-size:40px; line-height:1; background:none; border:0; cursor:pointer; color:var(--line); padding:4px; }
-  .stars button.on { color:var(--star); }
-  textarea { width:100%; min-height:110px; margin:14px 0 10px; padding:10px; border:1px solid var(--line); border-radius:10px; background:var(--bg); color:var(--ink); font:inherit; }
-  .btn { display:block; width:100%; padding:13px; border-radius:10px; border:0; background:var(--brand); color:var(--brand-ink); font:inherit; font-weight:600; text-decoration:none; cursor:pointer; margin-top:8px; }
-  .link { display:inline-block; margin-top:14px; color:var(--muted); font-size:14px; }
-  [hidden] { display:none !important; }
-</style>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap">
+<link rel="stylesheet" href="/r.css">
 </head>
 <body>
-<div class="card">
-  <div id="ask">
+<main class="card">
+  <div class="logo" aria-hidden="true">★</div>
+  <section id="ask">
     <h1 id="title">How was your visit?</h1>
     <p>Tap a star to rate us</p>
-    <div class="stars" id="stars"></div>
-  </div>
-  <div id="happy" hidden>
-    <h1>Thank you!</h1>
-    <p>Would you share that on Google? It really helps a small business.</p>
+    <div class="stars" id="stars" role="radiogroup" aria-label="Rating"></div>
+  </section>
+  <section id="happy" hidden>
+    <h1>Thank you! 🙏</h1>
+    <p>Would you share that on Google? It takes 30 seconds and really helps us.</p>
     <a class="btn" id="googleBtn" target="_blank" rel="noopener">Write a Google review</a>
-  </div>
-  <div id="sad" hidden>
+    <button class="link" id="addNote" type="button">Or leave a private note for the owner</button>
+  </section>
+  <section id="sad" hidden>
     <h1>Sorry we let you down</h1>
     <p>Tell us what went wrong. The owner reads every message.</p>
-    <textarea id="fb" placeholder="What could we do better?"></textarea>
-    <button class="btn" id="sendFb">Send to the owner</button>
+    <textarea id="fb" maxlength="2000" placeholder="What could we do better?"></textarea>
+    <button class="btn" id="sendFb" type="button">Send to the owner</button>
     <a class="link" id="googleLink" target="_blank" rel="noopener">Or post a review on Google</a>
-  </div>
-  <div id="done" hidden><h1>Thanks for telling us</h1><p>We'll use this to do better.</p></div>
-</div>
-<script>
-const t = new URLSearchParams(location.search).get('t') || location.pathname.split('/').pop();
-const $ = s => document.querySelector(s);
-let rating = 0;
-
-function show(id) { ['ask', 'happy', 'sad', 'done'].forEach(x => $('#' + x).hidden = x !== id); }
-function setGoogle(url) {
-  // Every customer can reach Google; Google's policy forbids only asking happy customers ("review gating").
-  if (url) { $('#googleBtn').href = $('#googleLink').href = url; } else { $('#googleBtn').hidden = $('#googleLink').hidden = true; }
-}
-async function post(body) {
-  const r = await fetch('/api/review', { method:'POST', headers:{ 'content-type':'application/json' }, body: JSON.stringify({ t, ...body }) });
-  return r.json();
-}
-
-for (let i = 1; i <= 5; i++) {
-  const b = document.createElement('button');
-  b.textContent = '★'; b.setAttribute('aria-label', i + ' star' + (i > 1 ? 's' : ''));
-  b.onmouseenter = () => paint(i); b.onmouseleave = () => paint(rating);
-  b.onclick = async () => {
-    rating = i; paint(i);
-    const r = await post({ rating: i });
-    setGoogle(r.google);
-    show(i >= 4 ? 'happy' : 'sad');
-  };
-  $('#stars').append(b);
-}
-function paint(n) { [...$('#stars').children].forEach((b, i) => b.classList.toggle('on', i < n)); }
-
-$('#sendFb').onclick = async () => { await post({ rating, feedback: $('#fb').value }); show('done'); };
-
-fetch('/api/review?t=' + encodeURIComponent(t)).then(r => r.json()).then(r => {
-  if (r.error) { $('#title').textContent = r.error; $('#stars').hidden = true; return; }
-  $('#title').textContent = 'How was your visit to ' + r.business + '?';
-  setGoogle(r.google);
-});
-</script>
+  </section>
+  <section id="done" hidden><h1>Thanks for telling us</h1><p>We'll use this to do better.</p></section>
+  <section id="already" hidden><h1>Thanks!</h1><p>You've already rated this visit.</p><a class="btn" id="googleAgain" target="_blank" rel="noopener" hidden>Write a Google review</a></section>
+</main>
+<script src="/r.js" type="module"></script>
 </body>
 </html>

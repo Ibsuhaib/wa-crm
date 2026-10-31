@@ -1,3 +1,25 @@
 {
-  "rewrites": [{ "source": "/r/:token", "destination": "/r.html?t=:token" }]
+  "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/router?path=$1" },
+    { "source": "/r/([A-Za-z0-9_-]+)", "destination": "/r.html?t=$1" }
+  ],
+  "functions": {
+    "api/router.js": { "maxDuration": 60 }
+  },
+  "crons": [
+    { "path": "/api/cron/birthdays", "schedule": "30 3 * * *" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "Content-Security-Policy", "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "Permissions-Policy", "value": "camera=(), microphone=(), geolocation=()" },
+        { "key": "Strict-Transport-Security", "value": "max-age=63072000; includeSubDomains" }
+      ]
+    }
+  ]
 }

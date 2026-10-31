@@ -1,0 +1,18 @@
+:root { --navy: #0b1220; --gold: #d4a373; --gold-2: #ddb586; --bg: #fff8f0; --card: #fff; --ink: #1f2937; --muted: #6b7280; --line: #efe6da; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0b1220; --card: #131d31; --ink: #e5e7eb; --muted: #9aa4b5; --line: #223049; } }
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; display: grid; place-items: center; padding: 16px; background: var(--bg); color: var(--ink); font: 16px/1.5 Poppins, system-ui, -apple-system, "Segoe UI", sans-serif; }
+[hidden] { display: none !important; }
+.card { width: 100%; max-width: 420px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 32px 24px 28px; text-align: center; box-shadow: 0 12px 40px rgba(11,18,32,.08); }
+.logo { width: 52px; height: 52px; margin: 0 auto 14px; border-radius: 14px; background: var(--navy); color: var(--gold); display: grid; place-items: center; font-size: 24px; }
+h1 { font-size: 21px; margin: 0 0 6px; font-weight: 700; }
+p { color: var(--muted); margin: 0 0 20px; }
+.stars { display: flex; justify-content: center; gap: 4px; }
+.stars button { font-size: 42px; line-height: 1; background: none; border: 0; cursor: pointer; color: var(--line); padding: 4px; transition: transform .1s; }
+.stars button:active { transform: scale(.9); }
+.stars button.on { color: var(--gold); }
+textarea { width: 100%; min-height: 120px; margin: 0 0 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--ink); font: inherit; resize: vertical; }
+textarea:focus { outline: none; border-color: var(--gold); }
+.btn { display: block; width: 100%; padding: 14px; border-radius: 12px; border: 0; background: var(--gold); color: var(--navy); font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.btn:disabled { opacity: .6; }
+.link { display: inline-block; margin-top: 14px; color: var(--muted); font-size: 14px; background: none; border: 0; font-family: inherit; cursor: pointer; text-decoration: underline; }

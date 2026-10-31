@@ -1,94 +1,87 @@
-# WhatsApp CRM (MVP)
+# hungriAR CRM
 
-Customer list, bulk WhatsApp offers with one-time coupon codes, review requests after each visit,
-and STOP opt-out. Runs free on **Vercel** (hosting + API) and **Supabase** (database).
-The only running cost is Meta's per-message fee, billed to each shop's own Meta account.
+WhatsApp CRM for restaurants and cafes. Live at **https://crm.hungriar.app**.
+
+- **Check-in at billing:** type the guest's number, and visits, spend, loyalty rewards and unused coupons appear.
+- **Review requests:** a WhatsApp rating link after each visit. Every guest can reach Google; low ratings also come to the owner privately.
+- **Offer campaigns:** one-time coupon codes per guest, sent to segments (everyone, win-back, regulars, new, tag).
+- **Coupons:** redeem by code or phone; a code can never be used twice.
+- **QR sign-up:** guests scan, WhatsApp opens with JOIN, they're added with consent.
+- **Birthday treats:** automatic coupon at 9 AM IST on the guest's birthday.
+- **Reviews inbox, stats overview, CSV import/export.**
+- **Multi-restaurant SaaS:** platform admin + one owner login per restaurant, fully isolated.
+
+## Layout
 
 ```
-index.html        dashboard: Check-in, Customers, Campaigns, Redeem, Settings
-r.html            public review page customers open from WhatsApp (yourapp.vercel.app/r/<token>)
-api/              Vercel serverless functions (Node)
-  visits.js       check a customer in, send review request
-  campaigns.js    create campaign, queue messages + coupons
-  send-batch.js   send next 20 messages (dashboard loops it; respects 250/day limit)
-  webhook.js      Meta delivery receipts + STOP/START replies
-  coupons.js      check / redeem a code (can only be redeemed once)
-  review.js       public: save star rating + feedback
-schema.sql        run once in Supabase
+index.html, app.js, app.css   dashboard (no build step)
+r.html, r.js, r.css           public review page: /r/<token>
+api/router.js                 the only Vercel function; routes every /api/* call
+lib/core.js                   auth, tenant scoping, validation, WhatsApp client
+lib/routes/*.js               account, customers, campaigns, counter (coupons/reviews/stats/QR), webhook
+schema.sql, migrate-002.sql   database (run both, in order, on a new Supabase project)
+tests/live.mjs                117 end-to-end tests against the live site
 ```
 
-## 1. Supabase (10 min)
+## Security model
 
-1. Create a free project at supabase.com (region: Mumbai).
-2. SQL Editor → paste all of `schema.sql` → Run.
-3. Project Settings → API: copy the **Project URL** and the **service_role** key.
+- **Logins:** owners sign in with a login ID and password (scrypt-hashed); 5 wrong tries lock the account for 15 minutes. The platform admin signs in with `ADMIN_KEY` (12-hour session).
+- **Sessions:** HMAC-signed tokens (`SESSION_SECRET`). Changing a password or pausing a restaurant logs out every device.
+- **Tenant isolation:** owners are pinned to their own restaurant on every request; any record by ID is checked against it.
+- **Webhook:** every Meta POST must carry a valid `X-Hub-Signature-256` (`WA_APP_SECRET`).
+- **Browser:** strict CSP (no inline or third-party scripts), no framing, HSTS, all output escaped.
+- **Database:** RLS on with no policies; only the server's service-role key can read or write. SQL functions are revoked from public roles.
+- **Consent:** campaigns only reach guests with recorded consent who haven't replied STOP. Staff can unsubscribe a guest but never re-subscribe them.
 
-## 2. Deploy to Vercel (5 min)
+## Running the tests
 
-1. Push this folder to GitHub, then Vercel → Add New Project → import it. No build settings needed.
-2. Settings → Environment Variables: add everything in `.env.example`.
-   `ADMIN_KEY` and `WA_VERIFY_TOKEN` are any long random strings you make up.
-3. Redeploy, open the site, enter your admin key, and create the first business in Settings.
+```bash
+npm test
+```
+Creates throwaway restaurants on the live site, runs every flow (auth, isolation, check-in races, coupons, webhook signatures, birthdays…) and deletes them.
 
-## 3. Meta WhatsApp Cloud API, per shop (same day, no verification needed)
+## Local development
 
-Without business verification you can message **250 unique customers per 24 hours** per number.
-The dashboard enforces this and lets you press Send again the next day. Apply for verification in parallel.
+```bash
+npx vercel dev
+```
+Needs a `.env` file with the variables from `.env.example`, comments on their own lines.
 
-1. **SIM**: get a fresh number for the shop that is *not* on the WhatsApp app (or delete WhatsApp from it first).
-2. **business.facebook.com** → create a Business portfolio for the shop.
-3. **developers.facebook.com** → My Apps → Create App → type *Business* → add the **WhatsApp** product.
-4. WhatsApp → API Setup → **Add phone number** → enter display name, verify the SIM by OTP.
-   Copy the **Phone number ID** into the dashboard's Settings.
-5. **Permanent token** (the one on the API Setup page expires in 24 h):
-   Business Settings → Users → System users → Add (Admin) → Assign assets → your app + WhatsApp account (full control)
-   → Generate token with `whatsapp_business_messaging` and `whatsapp_business_management`, expiry *Never*.
-   Paste it into Settings → WhatsApp access token.
-6. **Payment method**: WhatsApp Manager → Payment settings → add the shop's card. Marketing templates won't send without it.
-7. **Webhook**: App → WhatsApp → Configuration → Callback URL `https://<your-app>.vercel.app/api/webhook`,
-   Verify token = your `WA_VERIFY_TOKEN` → Verify and save → subscribe to the **messages** field.
-   Put the App secret (App settings → Basic) in `WA_APP_SECRET`.
-8. **Templates**: WhatsApp Manager → Message templates → Create. Approval is usually minutes to hours.
+## Connect a restaurant's WhatsApp (Meta Cloud API)
 
-### Templates to submit
+Without business verification you can message **250 unique customers per 24 hours** per number. The dashboard enforces this, and you press Send again the next day. Apply for verification in parallel.
 
-**Offer** — category *Marketing*, name `next_visit_offer`:
+1. **SIM:** a number that is *not* on the WhatsApp app.
+2. **business.facebook.com:** create a Business portfolio for the restaurant.
+3. **developers.facebook.com:** Create App → *Business* → add **WhatsApp**.
+4. WhatsApp → API Setup → **Add phone number** → verify by OTP. Copy the **Phone number ID** into Settings.
+5. **Permanent token:** Business Settings → System users → Add (Admin) → assign the app + WhatsApp account → Generate token with `whatsapp_business_messaging` and `whatsapp_business_management`, expiry *Never*. Paste into Settings.
+6. **Payment method:** WhatsApp Manager → Payment settings.
+7. **Webhook:** App → WhatsApp → Configuration → Callback URL `https://crm.hungriar.app/api/webhook`, Verify token = `WA_VERIFY_TOKEN`. Subscribe to **messages**. Put the App secret in the `WA_APP_SECRET` env var on Vercel.
+8. **Templates:** WhatsApp Manager → Message templates (approval: minutes to hours).
+
+### Templates
+
+**Offer** (*Marketing*, `next_visit_offer`). Campaign variables: `{name}` `{business}` `{percent}` `{code}` `{expiry}`
 ```
 Hi {{1}}, thanks for being a regular at {{2}}! 🎉
 Here's {{3}}% off your next visit. Show this code at the counter: *{{4}}*
-Valid till {{5}}.
-Reply STOP to stop offers.
+Valid till {{5}}. Reply STOP to stop offers.
 ```
-Dashboard variables (default): `{name}` `{business}` `{percent}` `{code}` `{expiry}`
 
-**Review** — category *Utility* (cheaper; Meta may reclassify it as Marketing), name `visit_review`:
+**Review** (*Utility*, `visit_review`). Settings variables: `{name}` `{business}` `{link}`
 ```
 Hi {{1}}, thanks for visiting {{2}} today. How did we do? It takes 10 seconds: {{3}}
 ```
-Settings variables (default): `{name}` `{business}` `{link}`
 
-Meta wants an example value for each `{{n}}` when you submit; use realistic ones (`Rahul`, `Cafe Mocha`, `5`, `K7XM2P`, `30 Nov`).
+**Birthday** (*Marketing*, `birthday_offer`). Settings variables: `{name}` `{business}` `{percent}` `{code}` `{expiry}`
+```
+Happy birthday {{1}}! 🎂 {{2}} has a treat for you: {{3}}% off with code *{{4}}*, valid till {{5}}.
+```
 
 ## Rules that keep the number from being banned
 
-- Only message customers who agreed (ask at the counter, or a sign on the QR stand).
-- Every marketing template ends with "Reply STOP…". STOP replies are handled automatically.
-- Start slow with a new number. Many blocks/reports drop the number's quality rating and Meta then limits it.
-- Don't use unofficial WhatsApp Web tools for bulk sends.
-- The review page shows the Google link to every customer, happy or not. Google's policy forbids
-  sending only happy customers to Google ("review gating"), and can remove the shop's reviews for it.
-
-## Run locally
-
-```bash
-npm install
-npx vercel dev
-```
-Put the variables in `.env.local`. Meta can't reach localhost for webhooks, so test those on the deployed URL.
-
-## Known MVP limits
-
-- One admin key for the whole app, so it's for you (the agency) managing shops, not shop staff logins yet.
-  Next step: Supabase Auth + a `business_users` table.
-- Shop WhatsApp tokens are stored in the database as plain text. Keep the service_role key secret.
-- No scheduled automations yet (birthday, "we miss you"). Vercel's free cron runs once a day, which is enough for those.
+- Only message guests who agreed. Check-in and import both record consent; QR sign-ups are consent by design.
+- Every marketing template ends with "Reply STOP…". STOP/START are handled automatically.
+- Start slow with a new number; blocks and reports lower its quality rating.
+- Never use unofficial WhatsApp Web tools for bulk sends.
