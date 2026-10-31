@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WhatsApp CRM</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#16181d; --muted:#667085; --line:#e4e7ec; --brand:#128c4a; --brand-ink:#fff; --bad:#c0362c; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1115; --card:#181b21; --ink:#eceef2; --muted:#98a2b3; --line:#2a2f38; --brand:#25b864; --brand-ink:#06210f; --bad:#ff6b5e; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background:var(--bg); color:var(--ink); }
+  header { display:flex; flex-wrap:wrap; gap:12px; align-items:center; padding:12px 16px; background:var(--card); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:2; }
+  header h1 { font-size:17px; margin:0 8px 0 0; }
+  nav { display:flex; gap:4px; flex-wrap:wrap; }
+  nav button { background:none; border:0; color:var(--muted); padding:7px 12px; border-radius:8px; cursor:pointer; font:inherit; }
+  nav button.on { background:var(--bg); color:var(--ink); font-weight:600; }
+  main { max-width:1000px; margin:0 auto; padding:16px; }
+  section { display:none; } section.on { display:block; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .card h2 { font-size:15px; margin:0 0 12px; }
+  .row { display:flex; flex-wrap:wrap; gap:10px; align-items:end; }
+  .row > label { flex:1 1 180px; }
+  label { display:block; font-size:13px; color:var(--muted); }
+  input, select, textarea { width:100%; margin-top:4px; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:var(--bg); color:var(--ink); font:inherit; }
+  textarea { min-height:90px; }
+  button.primary, button.ghost { padding:9px 16px; border-radius:8px; font:inherit; font-weight:600; cursor:pointer; }
+  button.primary { background:var(--brand); color:var(--brand-ink); border:0; }
+  button.ghost { background:none; color:var(--ink); border:1px solid var(--line); }
+  button:disabled { opacity:.5; cursor:default; }
+  .check { display:flex; gap:8px; align-items:center; color:var(--ink); }
+  .check input { width:auto; margin:0; }
+  table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 6px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:500; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
+  .scroll { overflow-x:auto; }
+  .tag { display:inline-block; padding:1px 8px; margin:1px; border-radius:99px; background:var(--bg); border:1px solid var(--line); font-size:12px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .msg { margin-top:10px; font-size:14px; } .msg.bad { color:var(--bad); }
+  .big { font-size:28px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+  #bizSel { width:auto; min-width:180px; margin:0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>WhatsApp CRM</h1>
+  <select id="bizSel" aria-label="Business"></select>
+  <nav id="tabs">
+    <button data-t="checkin" class="on">Check-in</button>
+    <button data-t="customers">Customers</button>
+    <button data-t="campaigns">Campaigns</button>
+    <button data-t="redeem">Redeem</button>
+    <button data-t="settings">Settings</button>
+  </nav>
+</header>
+<main>
+  <section id="checkin" class="on">
+    <div class="card">
+      <h2>Check in a customer</h2>
+      <form id="visitForm" class="row">
+        <label>Phone <input name="phone" inputmode="tel" required placeholder="98765 43210"></label>
+        <label>Name (optional) <input name="name"></label>
+        <label>Bill amount (optional) <input name="amount" type="number" min="0"></label>
+        <label class="check"><input type="checkbox" name="send_review" checked> Send review request</label>
+        <button class="primary">Check in</button>
+      </form>
+      <div id="visitMsg" class="msg"></div>
+    </div>
+  </section>
+
+  <section id="customers">
+    <div class="card">
+      <h2>Add or import customers</h2>
+      <p class="muted">One per line: <code>phone, name, tag1;tag2</code>. Only add people who agreed to get WhatsApp messages.</p>
+      <textarea id="importBox" placeholder="9876543210, Rahul, vip&#10;9123456780, Priya"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="importBtn">Save customers</button>
+        <label style="flex:0 1 auto"><input type="file" id="csvFile" accept=".csv,.txt"></label>
+      </div>
+      <div id="importMsg" class="msg"></div>
+    </div>
+    <div class="card">
+      <div class="row" style="margin-bottom:10px">
+        <label>Search <input id="custQ" placeholder="Name or phone"></label>
+        <label>Tag <input id="custTag" placeholder="vip"></label>
+      </div>
+      <div class="scroll"><table>
+        <thead><tr><th>Name</th><th>Phone</th><th>Visits</th><th>Last visit</th><th>Tags</th><th></th></tr></thead>
+        <tbody id="custRows"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section id="campaigns">
+    <div class="card">
+      <h2>New campaign</h2>
+      <form id="campForm">
+        <div class="row">
+          <label>Campaign name <input name="name" required placeholder="Diwali offer"></label>
+          <label>Type
+            <select name="kind" id="campKind">
+              <option value="offer">Offer with coupon code</option>
+              <option value="message">Plain message</option>
+            </select>
+          </label>
+          <label>Only tag (blank = everyone) <input name="tag"></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label>Approved template name <input name="template_name" required placeholder="next_visit_offer"></label>
+          <label>Template language <input name="template_lang" value="en"></label>
+          <label class="offerOnly">Discount % <input name="offer_percent" type="number" min="1" max="100" value="5"></label>
+          <label class="offerOnly">Valid for (days) <input name="offer_valid_days" type="number" min="1" value="30"></label>
+        </div>
+        <label style="margin-top:10px">Template variables, one per line, in order ({{1}}, {{2}}, ...).
+          You can use {name} {business} {percent} {code} {expiry}
+          <textarea name="params">{name}
+{business}
+{percent}
+{code}
+{expiry}</textarea>
+        </label>
+        <button class="primary" style="margin-top:10px">Create campaign</button>
+      </form>
+      <div id="campMsg" class="msg"></div>
+    </div>
+    <div class="card">
+      <h2>Campaigns</h2>
+      <div class="scroll"><table>
+        <thead><tr><th>Name</th><th>To</th><th>Sent</th><th>Delivered</th><th>Read</th><th>Failed</th><th>Redeemed</th><th></th></tr></thead>
+        <tbody id="campRows"></tbody>
+      </table></div>
+    </div>
+  </section>
+
+  <section id="redeem">
+    <div class="card">
+      <h2>Redeem a coupon</h2>
+      <form id="redeemForm" class="row">
+        <label>Coupon code <input name="code" required autocomplete="off" style="text-transform:uppercase"></label>
+        <button type="button" class="ghost" id="checkCode">Check</button>
+        <button class="primary">Redeem</button>
+      </form>
+      <div id="redeemMsg" class="msg"></div>
+    </div>
+  </section>
+
+  <section id="settings">
+    <div class="card">
+      <h2 id="setTitle">Business settings</h2>
+      <form id="bizForm">
+        <div class="row">
+          <label>Business name <input name="name" required></label>
+          <label>Google review link <input name="google_review_url" placeholder="https://g.page/r/.../review"></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label>WhatsApp phone number ID <input name="wa_phone_number_id"></label>
+          <label>WhatsApp access token <input name="wa_token" type="password" autocomplete="off" placeholder="leave blank to keep current"></label>
+          <label>Daily customer limit <input name="daily_limit" type="number" min="1" value="250"></label>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label>Review template name <input name="review_template" placeholder="visit_review"></label>
+          <label>Review template language <input name="review_lang" value="en"></label>
+        </div>
+        <label style="margin-top:10px">Review template variables, one per line. You can use {name} {business} {link}
+          <textarea name="review_params"></textarea>
+        </label>
+        <div class="row" style="margin-top:10px">
+          <button class="primary">Save</button>
+          <button type="button" class="ghost" id="newBiz">+ New business</button>
+        </div>
+      </form>
+      <div id="bizMsg" class="msg"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+const fmtDate = d => d ? new Date(d).toLocaleDateString('en-IN', { day:'numeric', month:'short' }) : '-';
+const lines = s => s.split('\n').map(x => x.trim()).filter(Boolean);
+let KEY = (() => { try { return localStorage.getItem('crmKey') || ''; } catch { return ''; } })();
+let businesses = [], bizId = null, creatingBiz = false;
+
+async function api(path, { method = 'GET', body } = {}) {
+  if (!KEY) askKey();
+  const r = await fetch('/api/' + path, {
+    method, body: body && JSON.stringify(body),
+    headers: { 'content-type': 'application/json', 'x-admin-key': KEY },
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) { askKey(); throw new Error('Wrong admin key, try again'); }
+  if (!r.ok) throw new Error(j.error || 'Request failed (' + r.status + ')');
+  return j;
+}
+function askKey() {
+  KEY = prompt('Admin key (the ADMIN_KEY you set in Vercel):') || '';
+  try { localStorage.setItem('crmKey', KEY); } catch {}
+}
+function say(el, text, bad) { el.textContent = text; el.className = 'msg' + (bad ? ' bad' : ''); }
+async function guard(el, fn) { try { await fn(); } catch (e) { say(el, e.message, true); } }
+
+// Tabs
+$('#tabs').onclick = e => {
+  const t = e.target.dataset.t; if (!t) return;
+  document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.t === t));
+  document.querySelectorAll('section').forEach(s => s.classList.toggle('on', s.id === t));
+  if (t === 'customers') loadCustomers();
+  if (t === 'campaigns') loadCampaigns();
+  if (t === 'settings') fillSettings();
+};
+
+// Businesses
+async function loadBusinesses() {
+  businesses = await api('businesses');
+  if (!businesses.length) {
+    creatingBiz = true;
+    $('#bizSel').innerHTML = '<option>No business yet</option>';
+    $('#tabs [data-t=settings]').click();
+    return;
+  }
+  bizId = businesses.find(b => b.id === bizId)?.id || businesses[0].id;
+  $('#bizSel').innerHTML = businesses.map(b => `<option value="${b.id}">${esc(b.name)}</option>`).join('');
+  $('#bizSel').value = bizId;
+}
+$('#bizSel').onchange = e => { bizId = e.target.value; creatingBiz = false; document.querySelector('#tabs .on').click(); };
+
+function fillSettings() {
+  const f = $('#bizForm'), b = creatingBiz ? null : businesses.find(x => x.id === bizId);
+  $('#setTitle').textContent = b ? 'Settings for ' + b.name : 'Add your first business';
+  f.name.value = b?.name || '';
+  f.google_review_url.value = b?.google_review_url || '';
+  f.wa_phone_number_id.value = b?.wa_phone_number_id || '';
+  f.wa_token.value = '';
+  f.wa_token.placeholder = b?.has_token ? 'saved - leave blank to keep' : 'paste token';
+  f.daily_limit.value = b?.daily_limit || 250;
+  f.review_template.value = b?.review_template || '';
+  f.review_lang.value = b?.review_lang || 'en';
+  f.review_params.value = (b?.review_params || ['{name}', '{business}', '{link}']).join('\n');
+}
+$('#newBiz').onclick = () => { creatingBiz = true; fillSettings(); };
+$('#bizForm').onsubmit = e => {
+  e.preventDefault();
+  guard($('#bizMsg'), async () => {
+    const f = e.target, body = Object.fromEntries(new FormData(f));
+    body.review_params = lines(body.review_params);
+    body.daily_limit = Number(body.daily_limit) || 250;
+    if (creatingBiz) {
+      bizId = (await api('businesses', { method:'POST', body })).id;
+      creatingBiz = false;
+    } else {
+      await api('businesses?id=' + bizId, { method:'PATCH', body });
+    }
+    await loadBusinesses(); fillSettings();
+    say($('#bizMsg'), 'Saved');
+  });
+};
+
+// Check-in
+$('#visitForm').onsubmit = e => {
+  e.preventDefault();
+  const f = e.target;
+  guard($('#visitMsg'), async () => {
+    const r = await api('visits', { method:'POST', body: {
+      business_id: bizId, phone: f.phone.value, name: f.name.value.trim(),
+      amount: Number(f.amount.value) || null, send_review: f.send_review.checked,
+    }});
+    say($('#visitMsg'), `Checked in. Visit #${r.visits}. Review request: ${r.review}.`, r.review.startsWith('failed'));
+    f.phone.value = f.name.value = f.amount.value = '';
+    f.phone.focus();
+  });
+};
+
+// Customers
+let qTimer;
+async function loadCustomers() {
+  if (!bizId) return;
+  const q = encodeURIComponent($('#custQ').value.trim()), tag = encodeURIComponent($('#custTag').value.trim());
+  const rows = await api(`customers?business_id=${bizId}&q=${q}&tag=${tag}`).catch(e => (say($('#importMsg'), e.message, true), []));
+  $('#custRows').innerHTML = rows.map(c => `<tr>
+    <td>${esc(c.name) || '<span class="muted">-</span>'}${c.opted_out_at ? ' <span class="tag">opted out</span>' : ''}</td>
+    <td>+${esc(c.phone)}</td><td>${c.visits}</td><td>${fmtDate(c.last_visit_at)}</td>
+    <td>${c.tags.map(t => `<span class="tag">${esc(t)}</span>`).join('')}</td>
+    <td><button class="ghost" data-del="${c.id}">Delete</button></td></tr>`).join('')
+    || '<tr><td colspan="6" class="muted">No customers yet</td></tr>';
+}
+$('#custQ').oninput = $('#custTag').oninput = () => { clearTimeout(qTimer); qTimer = setTimeout(loadCustomers, 300); };
+$('#custRows').onclick = e => {
+  const id = e.target.dataset.del;
+  if (id && confirm('Delete this customer and their history?'))
+    guard($('#importMsg'), async () => { await api('customers?id=' + id, { method:'DELETE' }); loadCustomers(); });
+};
+$('#csvFile').onchange = async e => { const file = e.target.files[0]; if (file) $('#importBox').value = await file.text(); };
+$('#importBtn').onclick = () => guard($('#importMsg'), async () => {
+  const customers = lines($('#importBox').value)
+    .filter(l => /\d{6}/.test(l))                      // skips a header row like "phone,name"
+    .map(l => { const [phone, name, tags] = l.split(',').map(x => (x || '').trim());
+      return { phone, name, tags: tags ? tags.split(/[;|]/).map(t => t.trim().toLowerCase()).filter(Boolean) : [] }; });
+  if (!customers.length) throw new Error('Nothing to import');
+  const r = await api('customers', { method:'POST', body: { business_id: bizId, customers } });
+  say($('#importMsg'), `Saved ${r.saved}.` + (r.invalid.length ? ` Skipped invalid numbers: ${r.invalid.join(', ')}` : ''), r.invalid.length > 0);
+  $('#importBox').value = '';
+  loadCustomers();
+});
+
+// Campaigns
+$('#campKind').onchange = e => document.querySelectorAll('.offerOnly').forEach(el => el.style.display = e.target.value === 'offer' ? '' : 'none');
+async function loadCampaigns() {
+  if (!bizId) return;
+  const rows = await api('campaigns?business_id=' + bizId).catch(e => (say($('#campMsg'), e.message, true), []));
+  $('#campRows').innerHTML = rows.map(c => `<tr>
+    <td>${esc(c.name)}<div class="muted">${c.kind === 'offer' ? c.offer_percent + '% off · ' : ''}${fmtDate(c.created_at)}</div></td>
+    <td>${c.total}</td><td>${c.sent}</td><td>${c.delivered}</td><td>${c.read}</td><td>${c.failed}</td>
+    <td>${c.kind === 'offer' ? c.redeemed : '-'}</td>
+    <td>${c.queued ? `<button class="primary" data-send="${c.id}">Send ${c.queued}</button>` : '<span class="muted">Done</span>'}</td></tr>`).join('')
+    || '<tr><td colspan="8" class="muted">No campaigns yet</td></tr>';
+}
+$('#campForm').onsubmit = e => {
+  e.preventDefault();
+  guard($('#campMsg'), async () => {
+    const body = Object.fromEntries(new FormData(e.target));
+    body.business_id = bizId;
+    body.params = lines(body.params);
+    body.offer_percent = Number(body.offer_percent);
+    body.offer_valid_days = Number(body.offer_valid_days);
+    const r = await api('campaigns', { method:'POST', body });
+    say($('#campMsg'), `Created. ${r.queued} customers queued. Press Send in the list below.`);
+    e.target.name.value = '';
+    loadCampaigns();
+  });
+};
+$('#campRows').onclick = e => {
+  const id = e.target.dataset.send; if (!id) return;
+  const btn = e.target; btn.disabled = true;
+  guard($('#campMsg'), async () => {
+    let total = 0, failed = 0;
+    while (true) {
+      const r = await api('send-batch', { method:'POST', body: { campaign_id: id } });
+      total += r.sent; failed += r.failed;
+      btn.textContent = `Sending… ${total} sent, ${r.remaining} left`;
+      if (r.limited) { say($('#campMsg'), `Daily limit reached after ${total} messages. Press Send again tomorrow to continue.`, true); break; }
+      if (!r.remaining || (!r.sent && !r.failed)) { say($('#campMsg'), `Finished: ${total} sent, ${failed} failed.`, failed > 0); break; }
+    }
+  }).finally(loadCampaigns);
+};
+
+// Redeem
+function showCoupon(c, done) {
+  const who = esc(c.customers?.name || '+' + c.customers?.phone);
+  $('#redeemMsg').className = 'msg';
+  $('#redeemMsg').innerHTML = `<div class="big">${c.percent}% off</div>${who}<br>` +
+    (done ? 'Redeemed just now.' : c.redeemed_at ? 'Already used.' : `Valid until ${fmtDate(c.expires_at)}.`);
+}
+$('#checkCode').onclick = () => guard($('#redeemMsg'), async () => {
+  const code = encodeURIComponent($('#redeemForm').code.value.trim());
+  showCoupon(await api(`coupons?business_id=${bizId}&code=${code}`));
+});
+$('#redeemForm').onsubmit = e => {
+  e.preventDefault();
+  guard($('#redeemMsg'), async () => {
+    showCoupon(await api('coupons', { method:'POST', body: { business_id: bizId, code: e.target.code.value } }), true);
+    e.target.code.value = '';
+  });
+};
+
+loadBusinesses().catch(e => say($('#visitMsg'), e.message, true));
+</script>
+</body>
+</html>
