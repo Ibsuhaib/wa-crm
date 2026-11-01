@@ -1,7 +1,8 @@
 {
   "rewrites": [
     { "source": "/api/(.*)", "destination": "/api/router?path=$1" },
-    { "source": "/r/([A-Za-z0-9_-]+)", "destination": "/r.html?t=$1" }
+    { "source": "/r/([A-Za-z0-9_-]+)", "destination": "/r.html?t=$1" },
+    { "source": "/privacy", "destination": "/privacy.html" }
   ],
   "functions": {
     "api/router.js": { "maxDuration": 60 }
