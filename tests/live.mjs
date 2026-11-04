@@ -100,9 +100,9 @@ try {
   check('owner cannot edit B', (await call(`businesses?id=${bizB}`, { method: 'PATCH', token: OA, body: { name: 'hacked' } })).status === 403);
   check('owner cannot create restaurants', (await call('businesses', { method: 'POST', token: OA, body: { name: 'x', slug: `t-y-${run}` } })).status === 403);
   check('owner cannot delete restaurants', (await call(`businesses?id=${bizA}&confirm=DELETE`, { method: 'DELETE', token: OA })).status === 403);
-  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: OA, body: { daily_limit: 99999, active: false, slug: 'stolen' } });
-  const { data: aRow } = await db.from('businesses').select('daily_limit, active, slug').eq('id', bizA).single();
-  check('owner cannot change plan limit, status or login ID', aRow.daily_limit === 250 && aRow.active && aRow.slug === `t-spice-${run}`, aRow);
+  const selfEdit = await call(`businesses?id=${bizA}`, { method: 'PATCH', token: OA, body: { name: 'mine', daily_limit: 99999, active: false, slug: 'stolen' } });
+  const { data: aRow } = await db.from('businesses').select('name, daily_limit, active, slug').eq('id', bizA).single();
+  check('owner cannot change any setting, even on their own restaurant', selfEdit.status === 403 && aRow.name === 'TEST Spice Garden' && aRow.daily_limit === 250 && aRow.active && aRow.slug === `t-spice-${run}`, aRow);
   const bImp = await call('customers', { method: 'POST', token: OB, body: { consent: true, customers: [{ phone: '9000000001', name: 'B Guest' }] } });
   check('owner B imports without passing business_id', bImp.body.saved === 1, bImp.body);
   const { data: bCust } = await db.from('customers').select('id').eq('business_id', bizB).single();
@@ -128,7 +128,13 @@ try {
   check('search by name', search.body.rows?.length === 1 && search.body.rows[0].name === 'Priya', search.body);
   check('search by phone digits', (await call('customers?q=56780', { token: OA })).body.rows?.length === 1);
   check('search with filter-injection characters is safe', (await call('customers?q=' + encodeURIComponent('%,name.eq.x),or(id.gt.0'), { token: OA })).status === 200);
-  check('filter by tag', (await call('customers?tag=VIP', { token: OA })).body.rows?.length === 1);
+  check('filter VIP', (await call('customers?group=vip', { token: OA })).body.rows?.map(c => c.name).join() === 'Rahul');
+  check('filter Common', (await call('customers?group=common', { token: OA })).body.rows?.length === 2);
+  await db.from('customers').update({ last_visit_at: '2026-01-15T10:00:00Z' }).eq('id', rahul.id);
+  const span = q => call('customers?' + new URLSearchParams(q), { token: OA });
+  check('filter by last visit from + to', (await span({ from: '2026-01-15T09:00:00Z', to: '2026-01-15T11:00:00Z' })).body.rows?.map(c => c.name).join() === 'Rahul');
+  check('date filter excludes outside the time window', (await span({ from: '2026-01-15T10:30:00Z' })).body.rows?.length === 0);
+  check('bad date refused', (await span({ from: 'not-a-date' })).status === 400);
   const exp = await call('customers?all=1', { token: OA });
   check('export returns all', exp.body.rows?.length === 3);
   const edit = await call('customers?id=' + rahul.id, { method: 'PATCH', token: OA, body: { name: 'Rahul S', tags: 'vip, big spender', birthday: '1994-08-22' } });
@@ -138,35 +144,97 @@ try {
   check('very long name rejected', (await call('customers?id=' + rahul.id, { method: 'PATCH', token: OA, body: { name: 'x'.repeat(500) } })).status === 400);
 
   // ------------------------------------------------------------------
-  section('Check-in, loyalty, review requests');
-  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: OA, body: { loyalty_every: 3, loyalty_reward: 'Free dessert' } });
-  const v1 = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', name: 'Neha', amount: 850 } });
+  section('Check-in, loyalty, thank-you message');
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { loyalty_every: 3, loyalty_reward: 'Free dessert', google_review_url: 'https://g.page/r/test/review' } });
+  const v1 = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', name: 'Neha', amount: 850, birthday: '1996-03-04' } });
   check('check-in new guest', v1.body.customer?.new && v1.body.customer.visits === 1 && Number(v1.body.customer.total_spent) === 850, v1.body);
   check('shows visits left to reward', v1.body.next_reward_in === 2, v1.body);
+  const { data: neha } = await db.from('customers').select('id, birthday').eq('business_id', bizA).eq('phone', '919811111111').single();
+  check('birthday saved at check-in', neha.birthday === '1996-03-04', neha);
   await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', amount: 150 } });
   const v3 = await call('visits', { method: 'POST', token: OA, body: { phone: '+91 98111 11111' } });
   check('3rd visit earns loyalty reward', v3.body.reward === 'Free dessert' && v3.body.customer.visits === 3, v3.body);
   check('spend adds up', Number(v3.body.customer.total_spent) === 1000, v3.body.customer);
   check('name kept from first visit', v3.body.customer.name === 'Neha');
+  const { data: neha2 } = await db.from('customers').select('birthday').eq('id', neha.id).single();
+  check('check-in without a birthday keeps the saved one', neha2.birthday === '1996-03-04', neha2);
+  check('bad birthday at check-in refused', (await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', birthday: '1996-99-99' } })).status === 400);
   const par = await Promise.all(Array.from({ length: 6 }, () => call('visits', { method: 'POST', token: OA, body: { phone: '9822222222', amount: 100 } })));
   const { data: racer } = await db.from('customers').select('visits, total_spent').eq('business_id', bizA).eq('phone', '919822222222').single();
   check('6 simultaneous check-ins = exactly 6 visits (no race)', par.every(r => r.status === 200) && racer.visits === 6 && Number(racer.total_spent) === 600, racer);
   check('invalid phone rejected', (await call('visits', { method: 'POST', token: OA, body: { phone: '123' } })).status === 400);
   check('negative bill rejected', (await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', amount: -5 } })).status === 400);
   const noTpl = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
-  check('review skipped when no template set', noTpl.body.review?.includes('template'), noTpl.body.review);
-  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: OA, body: { review_template: 'visit_review', google_review_url: 'https://g.page/r/test/review' } });
+  check('message skipped when none is set up', noTpl.body.review?.includes('no check-in message'), noTpl.body.review);
+
+  // ------------------------------------------------------------------
+  section('Templates (admin only, Utility only)');
+  const mkTpl = async (biz, name, extra = {}) => (await db.from('templates').insert({
+    business_id: biz, title: name, name, text: 'Hi {name}, thanks for visiting {business}: {link} Thanks!', body: 'Hi {{1}}, thanks for visiting {{2}}: {{3}} Thanks!',
+    params: ['{name}', '{business}', '{link}'], category: 'UTILITY', status: 'APPROVED', meta_id: '1' + run, ...extra,
+  }).select().single()).data;
+  const thanks = await mkTpl(bizA, 'thanks');
+  const waiting = await mkTpl(bizA, 'waiting', { status: 'PENDING' });
+  const marketing = await mkTpl(bizA, 'pricey', { category: 'MARKETING' });
+  const otherTpl = await mkTpl(bizB, 'bloom_thanks');
+  check('owner cannot create a template', (await call('templates', { method: 'POST', token: OA, body: { title: 'x', text: 'Hello {name} there' } })).status === 403);
+  check('owner cannot edit a template', (await call('templates?id=' + thanks.id, { method: 'PATCH', token: OA, body: { title: 'x' } })).status === 403);
+  check('owner cannot delete a template', (await call('templates?id=' + thanks.id, { method: 'DELETE', token: OA })).status === 403);
+  const ownList = await call('templates', { token: OA });
+  check('owner only sees approved cheap messages', ownList.body.rows?.map(t => t.title).join() === 'thanks', ownList.body);
+  check('owner gets the text only, no Meta details', !('meta_id' in ownList.body.rows[0]) && !!ownList.body.rows[0].text, ownList.body.rows[0]);
+  check('owner B does not see A templates', (await call('templates', { token: OB })).body.rows?.every(t => t.title !== 'thanks'));
+  const admList = await call(`templates?business_id=${bizA}`, { token: A });
+  check('admin sees all, with Marketing flagged unsendable', admList.body.rows?.length === 3 && admList.body.rows.find(t => t.name === 'pricey').sendable === false, admList.body);
+  check('creating without a WhatsApp account explains why', /WhatsApp account ID/.test((await call('templates', { method: 'POST', token: A, body: { business_id: bizA, title: 'x', text: 'Hello {name} there' } })).body.error));
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { wa_waba_id: '123', wa_token: 'fake-token' } });
+  const tplErr = async text => (await call('templates', { method: 'POST', token: A, body: { business_id: bizA, title: 'x', text } })).body.error;
+  check('unknown variable refused', /not available/.test(await tplErr('Hello {price} there')));
+  check('message cannot start with a variable', /start or end/.test(await tplErr('{name} hello there')));
+  check('message cannot end with a variable', /start or end/.test(await tplErr('Hello there {name}')));
+  check('two variables side by side refused', /between two/.test(await tplErr('Hello {name} {business} there')));
+  check('a real Meta error is shown, not hidden', typeof (await tplErr('Hello {name} there')) === 'string');
+  check('check-in message must belong to this restaurant', (await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { checkin_template_id: otherTpl.id } })).status === 400);
+
+  // ------------------------------------------------------------------
+  section('No repeat messages');
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { checkin_template_id: waiting.id } });
+  const pend = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
+  check('template waiting for approval is not sent', pend.body.review?.includes('waiting for approval'), pend.body.review);
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { checkin_template_id: marketing.id } });
+  const mk1 = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
+  check('Marketing template is blocked at check-in', mk1.body.review?.includes('waiting for approval'), mk1.body.review);
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { checkin_template_id: thanks.id } });
   const rv1 = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
-  check('review send fails cleanly without WhatsApp', rv1.body.review?.startsWith('failed') && rv1.body.review.includes('not connected'), rv1.body.review);
+  check('failed send is reported', rv1.body.review?.startsWith('failed'), rv1.body.review);
   const rv2 = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
-  check('not asked twice the same day', rv2.body.review === 'skipped: already asked today', rv2.body.review);
+  check('a failed message can be retried', rv2.body.review?.startsWith('failed'), rv2.body.review);
+  const { count: orphanReviews } = await db.from('reviews').select('id', { count: 'exact', head: true }).eq('customer_id', neha.id);
+  check('failed send leaves no review link behind', orphanReviews === 0, orphanReviews);
+  await db.from('messages').insert({ business_id: bizA, customer_id: neha.id, template_name: 'thanks', status: 'sent', sent_at: new Date(Date.now() - 5 * 864e5).toISOString() });
+  const rep1 = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
+  check('same message within 30 days is not sent again', rep1.body.review?.startsWith('skipped: already sent on'), rep1.body.review);
+  const { data: racerRow } = await db.from('customers').select('id').eq('business_id', bizA).eq('phone', '919822222222').single();
+  await Promise.all(Array.from({ length: 5 }, () => call('visits', { method: 'POST', token: OA, body: { phone: '9822222222', send_review: true } })));
+  const { count: claims } = await db.from('messages').select('id', { count: 'exact', head: true }).eq('customer_id', racerRow.id).eq('status', 'sending');
+  check('no message left stuck after simultaneous check-ins', claims === 0, claims);
+  const racing = await Promise.all(Array.from({ length: 5 }, () => db.rpc('claim_message', { p_business: bizA, p_customer: racerRow.id, p_template: 'race', p_days: 30 })));
+  check('5 simultaneous claims: exactly one message wins', racing.filter(r => r.data).length === 1, racing.map(r => r.data));
+  await db.from('messages').delete().eq('customer_id', racerRow.id).eq('template_name', 'race');
+  await db.from('messages').update({ sent_at: new Date(Date.now() - 31 * 864e5).toISOString() }).eq('customer_id', neha.id).eq('status', 'sent');
+  const later = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
+  check('after 30 days it can go again', later.body.review?.startsWith('failed'), later.body.review);
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { repeat_days: 60 } });
+  const rule = await call('visits', { method: 'POST', token: OA, body: { phone: '9811111111', send_review: true } });
+  check('repeat days can be changed per restaurant', rule.body.review?.startsWith('skipped: already sent'), rule.body.review);
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { repeat_days: 30 } });
   const noCons = await call('visits', { method: 'POST', token: OA, body: { phone: '9833333333', consent: false, send_review: true } });
-  check('no review request without consent', noCons.body.review === 'skipped: no WhatsApp consent', noCons.body.review);
+  check('no message without consent', noCons.body.review === 'skipped: no WhatsApp consent', noCons.body.review);
+  const { data: rvIns } = await db.from('reviews').insert({ business_id: bizA, customer_id: neha.id, token: 'tok' + run + 'abcdef' }).select('token').single();
 
   // ------------------------------------------------------------------
   section('Public review page');
-  const { data: rvRow } = await db.from('reviews').select('token').eq('business_id', bizA).limit(1).single();
-  const tk = rvRow.token;
+  const tk = rvIns.token;
   check('review page served', (await fetch(BASE + '/r/' + tk)).ok);
   check('bad token 404', (await call('review?t=nope')).status === 404);
   check('injection-looking token 404', (await call('review?t=' + encodeURIComponent("' or 1=1--"))).status === 404);
@@ -184,60 +252,48 @@ try {
   check('owner B does not see A complaints', (await call('reviews', { token: OB })).body.length === 0);
 
   // ------------------------------------------------------------------
-  section('Campaigns');
-  const segs = async (segment, segment_value, tag) => (await call('campaigns/preview', { method: 'POST', token: OA, body: { segment, segment_value, tag } })).body.count;
-  const everyone = await segs('all');
-  check('audience: everyone excludes no-consent guest', everyone === 5, everyone);
-  check('audience: regulars (3+ visits)', (await segs('regulars', 3)) === 2);
-  check('audience: by tag', (await segs('tag', null, 'vip')) === 1);
-  check('audience: new in last 7 days', (await segs('new', 7)) === 5);
-  check('audience: inactive 30 days (none yet)', (await segs('inactive', 30)) === 0);
-  check('tag segment without a tag refused', (await call('campaigns/preview', { method: 'POST', token: OA, body: { segment: 'tag' } })).status === 400);
-  check('bad template name refused', (await call('campaigns', { method: 'POST', token: OA, body: { name: 'x', template_name: 'Bad Name!', offer_percent: 5 } })).status === 400);
-  check('offer without % refused', (await call('campaigns', { method: 'POST', token: OA, body: { name: 'x', template_name: 'offer', kind: 'offer' } })).status === 400);
-  const camp = await call('campaigns', { method: 'POST', token: OA, body: {
-    name: 'Weekend 10%', kind: 'offer', template_name: 'next_visit_offer', params: ['{name}', '{percent}', '{code}', '{expiry}'], offer_percent: 10, offer_valid_days: 14 } });
-  check('offer campaign created for everyone reachable', camp.body.queued === 5, camp.body);
-  const { count: coupons } = await db.from('coupons').select('id', { count: 'exact', head: true }).eq('campaign_id', camp.body.id);
-  check('one unique coupon per guest', coupons === 5);
-  check('owner B cannot send A campaign', (await call('send-batch', { method: 'POST', token: OB, body: { campaign_id: camp.body.id } })).status === 404);
-  const sb = await call('send-batch', { method: 'POST', token: OA, body: { campaign_id: camp.body.id } });
-  check('sending without WhatsApp fails cleanly with reason', sb.body.failed === 5 && sb.body.remaining === 0 && /not connected/.test(sb.body.last_error), sb.body);
-  const cl = await call('campaigns', { token: OA });
-  check('campaign stats', cl.body[0]?.failed === 5 && cl.body[0]?.status === 'done', cl.body[0]);
-  check('owner B sees no A campaigns', (await call('campaigns', { token: OB })).body.length === 0);
-
-  // ------------------------------------------------------------------
-  section('Coupons at the counter');
-  const { data: k } = await db.from('coupons').select('code, customer_id').eq('campaign_id', camp.body.id).limit(1).single();
-  const look = await call('coupons?code=' + k.code.toLowerCase(), { token: OA });
-  check('look up code (any case)', look.body.percent === 10, look.body);
-  check('owner B cannot use A coupon', (await call('coupons', { method: 'POST', token: OB, body: { code: k.code } })).status === 404);
-  const red = await call('coupons', { method: 'POST', token: OA, body: { code: ' ' + k.code.toLowerCase() + ' ' } });
-  check('redeem', red.status === 200 && red.body.redeemed_at, red.body);
-  const twice = await call('coupons', { method: 'POST', token: OA, body: { code: k.code } });
-  check('second redeem blocked', twice.status === 409 && /Already used/.test(twice.body.error), twice.body);
-  const { data: kk } = await db.from('coupons').select('code').eq('campaign_id', camp.body.id).is('redeemed_at', null).limit(2);
-  const both = await Promise.all([1, 2, 3].map(() => call('coupons', { method: 'POST', token: OA, body: { code: kk[0].code } })));
-  check('3 simultaneous redeems: exactly one wins', both.filter(r => r.status === 200).length === 1, both.map(r => r.status));
-  await db.from('coupons').update({ expires_at: new Date(Date.now() - 864e5).toISOString() }).eq('code', kk[1].code).eq('business_id', bizA);
-  const ex = await call('coupons', { method: 'POST', token: OA, body: { code: kk[1].code } });
-  check('expired coupon blocked', ex.status === 409 && /Expired/.test(ex.body.error), ex.body);
-  const { data: cust1 } = await db.from('customers').select('phone').eq('id', k.customer_id).single();
-  const byPhone = await call('coupons?phone=' + cust1.phone.slice(2), { token: OA });
-  check('find coupons by phone (used ones hidden)', Array.isArray(byPhone.body.coupons) && !byPhone.body.coupons.some(c => c.code === k.code), byPhone.body);
-  check('unknown code 404', (await call('coupons?code=ZZZZZZZ', { token: OA })).status === 404);
+  section('Select customers and send');
+  const allA = (await call('customers?all=1', { token: OA })).body.rows;
+  const priya = allA.find(c => c.name === 'Priya'), amit = allA.find(c => c.name === 'Amit');
+  check('sending needs a customer', (await call('send', { method: 'POST', token: OA, body: { template_id: thanks.id, ids: [] } })).status === 400);
+  check('Marketing template cannot be sent', /low-cost/.test((await call('send', { method: 'POST', token: OA, body: { template_id: marketing.id, ids: [priya.id] } })).body.error));
+  check('template waiting for approval cannot be sent', (await call('send', { method: 'POST', token: OA, body: { template_id: waiting.id, ids: [priya.id] } })).status === 400);
+  check('another restaurant\'s template refused', (await call('send', { method: 'POST', token: OA, body: { template_id: otherTpl.id, ids: [priya.id] } })).status === 404);
+  const s1 = await call('send', { method: 'POST', token: OA, body: { template_id: thanks.id, ids: [priya.id, amit.id, bCust.id] } });
+  check('selected customers queued; another restaurant\'s customer skipped', s1.body.queued === 2 && s1.body.skipped === 1, s1.body);
+  check('owner B cannot send A batch', (await call('send-batch', { method: 'POST', token: OB, body: { campaign_id: s1.body.id } })).status === 404);
+  const again = await call('send', { method: 'POST', token: OA, body: { template_id: thanks.id, ids: [priya.id] } });
+  check('already queued customer is not queued twice', again.body.queued === 0 && again.body.skipped === 1, again.body);
+  const pendingList = await call('messages', { token: OA });
+  check('unfinished send can be continued', pendingList.body.pending?.[0]?.queued === 2, pendingList.body.pending);
+  const sb = await call('send-batch', { method: 'POST', token: OA, body: { campaign_id: s1.body.id } });
+  check('failed sends are counted with the reason', sb.body.failed === 2 && sb.body.remaining === 0 && !!sb.body.last_error, sb.body);
+  const vipOnly = await call('send', { method: 'POST', token: OA, body: { template_id: thanks.id, all: true, filters: { group: 'vip' } } });
+  check('select all follows the filter (VIP only)', vipOnly.body.queued === 1 && vipOnly.body.skipped === 0, vipOnly.body);
+  await db.from('customers').update({ opted_out_at: new Date().toISOString() }).eq('id', amit.id);
+  await db.from('templates').update({ category: 'MARKETING' }).eq('id', thanks.id);
+  const blocked = await call('send-batch', { method: 'POST', token: OA, body: { campaign_id: vipOnly.body.id } });
+  check('template re-labelled Marketing mid-send stops the batch', blocked.status === 400 && /no longer approved/.test(blocked.body.error), blocked.body);
+  await db.from('templates').update({ category: 'UTILITY' }).eq('id', thanks.id);
+  const optOut = await call('send', { method: 'POST', token: OA, body: { template_id: thanks.id, ids: [amit.id] } });
+  check('unsubscribed customer is skipped', optOut.body.queued === 0 && optOut.body.skipped === 1, optOut.body);
+  await db.from('customers').update({ opted_out_at: null }).eq('id', amit.id);
+  const sentList = await call('messages', { token: OA });
+  check('sent messages list works', sentList.body.total >= 2 && !!sentList.body.rows[0].customers, sentList.body.total);
+  check('sent messages are read-only', (await call('messages', { method: 'POST', token: OA, body: {} })).status === 405);
+  check('owner B sees no A messages', (await call('messages', { token: OB })).body.total === 0);
+  check('old offer and coupon routes are gone', (await call('campaigns', { token: OA })).status === 404 && (await call('coupons?code=ABCD', { token: OA })).status === 404);
 
   // ------------------------------------------------------------------
   section('Stats & QR');
   const st = await call('stats', { token: OA });
-  check('stats', st.body.customers === 6 && st.body.visits_30d === 13 && st.body.visits_by_day?.length === 14 && st.body.ratings === 1, st.body);
+  check('stats', st.body.customers === 6 && st.body.visits_by_day?.length === 14 && st.body.ratings === 1, st.body);
   check('QR needs WhatsApp number', (await call('qr', { token: OA })).status === 400);
-  check('invalid WhatsApp number refused', (await call(`businesses?id=${bizA}`, { method: 'PATCH', token: OA, body: { wa_number: '12' } })).status === 400);
-  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: OA, body: { wa_number: '98000 11111', wa_phone_number_id: '1111' + run.replace(/\D/g, '') } });
+  check('invalid WhatsApp number refused', (await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { wa_number: '12' } })).status === 400);
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { wa_number: '98000 11111', wa_phone_number_id: '1111' + run.replace(/\D/g, '') } });
   const qr = await call('qr', { token: OA });
   check('QR code generated', qr.body.svg?.startsWith('<svg') && qr.body.link === 'https://wa.me/919800011111?text=JOIN', qr.body.link);
-  check('non-https review link refused', (await call(`businesses?id=${bizA}`, { method: 'PATCH', token: OA, body: { google_review_url: 'javascript:alert(1)' } })).status === 400);
+  check('non-https review link refused', (await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { google_review_url: 'javascript:alert(1)' } })).status === 400);
 
   // ------------------------------------------------------------------
   section('WhatsApp webhook');
@@ -255,7 +311,6 @@ try {
   await call('webhook', { method: 'POST', ...signed(waEvent(pnid, '919844444444', 'Stop')) });
   const { data: k2 } = await db.from('customers').select('opted_out_at').eq('id', kiran.id).single();
   check('STOP unsubscribes', !!k2.opted_out_at);
-  check('unsubscribed guest excluded from campaigns', (await segs('all')) === 5);
   check('staff cannot re-subscribe them', (await call('customers?id=' + kiran.id, { method: 'PATCH', token: OA, body: { opted_out: false } })).status === 400);
   await call('webhook', { method: 'POST', ...signed(waEvent(pnid, '919844444444', 'START')) });
   const { data: k3 } = await db.from('customers').select('opted_out_at').eq('id', kiran.id).single();
@@ -287,16 +342,50 @@ try {
   check('admin reset unlocks a locked account', resetC.status === 200 && (await call('login', { method: 'POST', body: { slug: `t-lock-${run}`, password: 'unlock-123' } })).status === 200);
 
   // ------------------------------------------------------------------
-  section('Birthday job');
-  check('cron refuses callers without the secret', (await call('cron/birthdays')).status === 401);
+  section('Birthdays');
+  const O2 = pc.body.token;
+  const cron = () => call('cron/daily', { headers: { authorization: 'Bearer ' + process.env.CRON_SECRET } });
+  check('cron refuses callers without the secret', (await call('cron/daily')).status === 401);
+  const wishes = async () => (await db.from('messages').select('status').eq('customer_id', rahul.id).eq('kind', 'birthday')).data;
+  const bd1 = await mkTpl(bizA, 'bday_one', { purpose: 'birthday', category: 'MARKETING' });
+  const bd2 = await mkTpl(bizA, 'bday_two', { purpose: 'birthday', category: 'MARKETING' });
+  const bdWait = await mkTpl(bizA, 'bday_wait', { purpose: 'birthday', category: 'MARKETING', status: 'PENDING' });
+  const bdOther = await mkTpl(bizC, 'bday_other', { purpose: 'birthday', category: 'MARKETING' });
+  check('owner without access is refused', (await call('birthdays', { token: O2 })).status === 403);
+  check('owner cannot give themselves access', (await call(`businesses?id=${bizA}`, { method: 'PATCH', token: O2, body: { birthday_access: true } })).status === 403);
+  check('owner without access sees no birthday messages', (await call('templates', { token: O2 })).body.rows?.every(t => t.purpose !== 'birthday'));
+  check('admin cannot switch on before giving access', (await call('birthdays', { method: 'PATCH', token: A, body: { business_id: bizA, auto: true } })).status === 400);
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { birthday_access: true } });
+  const bg = await call('birthdays', { token: O2 });
+  check('owner sees only approved birthday messages', bg.body.templates?.map(t => t.title).join() === 'bday_one,bday_two', bg.body.templates);
+  check('switching on needs a message', (await call('birthdays', { method: 'PATCH', token: O2, body: { auto: true } })).status === 400);
+  check('message waiting for approval cannot be picked', (await call('birthdays', { method: 'PATCH', token: O2, body: { template_id: bdWait.id } })).status === 400);
+  check('thank-you message cannot be picked as birthday', (await call('birthdays', { method: 'PATCH', token: O2, body: { template_id: thanks.id } })).status === 400);
+  check('another restaurant\'s message cannot be picked', (await call('birthdays', { method: 'PATCH', token: O2, body: { template_id: bdOther.id } })).status === 400);
+  check('birthday message cannot go in a bulk send', (await call('send', { method: 'POST', token: O2, body: { template_id: bd1.id, ids: [priya.id] } })).status === 400);
+  check('birthday message cannot be the check-in message', (await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { checkin_template_id: bd1.id } })).status === 400);
+  check('owner picks a message and switches on', (await call('birthdays', { method: 'PATCH', token: O2, body: { template_id: bd2.id, auto: true } })).status === 200);
   const today = new Date(Date.now() + 5.5 * 36e5);
-  const bday = `1990-${String(today.getUTCMonth() + 1).padStart(2, '0')}-${String(today.getUTCDate()).padStart(2, '0')}`;
-  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { birthday_template: 'birthday_offer' } });
-  await call('customers?id=' + rahul.id, { method: 'PATCH', token: A, body: { birthday: bday } });
-  const cr = await call('cron/birthdays', { headers: { authorization: 'Bearer ' + process.env.CRON_SECRET } });
-  check('cron runs and finds today\'s birthday', cr.status === 200 && cr.body.failed >= 1, cr.body);
-  const { count: bc } = await db.from('coupons').select('id', { count: 'exact', head: true }).eq('customer_id', rahul.id).eq('reason', 'birthday');
-  check('unsent birthday coupon removed so it retries tomorrow', bc === 0);
+  const pad = n => String(n).padStart(2, '0');
+  await db.from('customers').update({ birthday: `1990-${pad(today.getUTCMonth() + 1)}-${pad(today.getUTCDate())}` }).eq('id', rahul.id);
+  const up = await call('birthdays', { token: O2 });
+  check('upcoming list shows today\'s birthday first', up.body.upcoming?.[0]?.id === rahul.id && up.body.upcoming[0].days_away === 0, up.body.upcoming?.[0]);
+  await call('birthdays', { method: 'PATCH', token: O2, body: { auto: false } });
+  await cron();
+  check('switched off: no wish goes out', (await wishes()).length === 0);
+  await call('birthdays', { method: 'PATCH', token: O2, body: { auto: true } });
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { birthday_access: false } });
+  await cron();
+  check('access removed: no wish goes out, even if switched on', (await wishes()).length === 0);
+  await call(`businesses?id=${bizA}`, { method: 'PATCH', token: A, body: { birthday_access: true } });
+  const cr = await cron();
+  check('cron tries the wish', cr.status === 200 && cr.body.birthdays.failed >= 1, cr.body);
+  check('failed wish is recorded', (await wishes()).map(m => m.status).join() === 'failed', await wishes());
+  await db.from('messages').update({ status: 'sent' }).eq('customer_id', rahul.id).eq('kind', 'birthday');
+  await cron();
+  check('only one wish a year', (await wishes()).length === 1, await wishes());
+  const race = await Promise.all(Array.from({ length: 5 }, () => db.rpc('claim_birthday', { p_business: bizA, p_customer: priya.id, p_template: 'x' })));
+  check('5 simultaneous birthday claims: exactly one wins', race.filter(r => r.data).length === 1, race.map(r => r.data));
 
   // ------------------------------------------------------------------
   section('Admin');

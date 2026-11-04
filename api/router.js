@@ -3,15 +3,17 @@
 import { authenticate, fail, HttpError } from '../lib/core.js';
 import { login, me, businesses, password } from '../lib/routes/account.js';
 import { customers, customerDetail, visits } from '../lib/routes/customers.js';
-import { campaigns, preview, sendBatch, cronBirthdays } from '../lib/routes/campaigns.js';
-import { coupons, reviews, review, stats, qr } from '../lib/routes/counter.js';
+import { send, sendBatch, messages, cronDaily } from '../lib/routes/messages.js';
+import { birthdays } from '../lib/routes/birthdays.js';
+import { templates } from '../lib/routes/templates.js';
+import { reviews, review, stats, qr } from '../lib/routes/counter.js';
 import { webhook } from '../lib/routes/webhook.js';
 
 const PUBLIC = {
   'login': login,
   'review': review,
   'webhook': webhook,
-  'cron/birthdays': cronBirthdays,  // checks CRON_SECRET itself
+  'cron/daily': cronDaily,  // checks CRON_SECRET itself
 };
 const PRIVATE = {
   'me': me,
@@ -20,10 +22,11 @@ const PRIVATE = {
   'customers': customers,
   'customers/detail': customerDetail,
   'visits': visits,
-  'campaigns': campaigns,
-  'campaigns/preview': preview,
+  'templates': templates,
+  'send': send,
   'send-batch': sendBatch,
-  'coupons': coupons,
+  'messages': messages,
+  'birthdays': birthdays,
   'reviews': reviews,
   'stats': stats,
   'qr': qr,

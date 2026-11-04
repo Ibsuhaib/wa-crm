@@ -8,7 +8,7 @@
     "api/router.js": { "maxDuration": 60 }
   },
   "crons": [
-    { "path": "/api/cron/birthdays", "schedule": "30 3 * * *" }
+    { "path": "/api/cron/daily", "schedule": "30 3 * * *" }
   ],
   "headers": [
     {
